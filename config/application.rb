@@ -52,6 +52,29 @@ module Chatwoot
     enterprise_initializers = Rails.root.join('enterprise/config/initializers')
     Dir[enterprise_initializers.join('**/*.rb')].each { |f| require f } if enterprise_initializers.exist?
 
+    # Fork-local overrides. ChatwootApp.extensions already returns
+    # %w[enterprise custom] when custom/ exists, and the injector in
+    # 01_inject_enterprise_edition_module.rb prepends Custom:: modules -- but
+    # nothing upstream puts custom/ on the load path, so those constants are
+    # never found. These lines mirror the enterprise block above to close that
+    # gap. Order matters: custom/ is prepended after enterprise/, which puts
+    # Custom:: ahead of Enterprise:: in the ancestor chain.
+    #
+    # Note we test the directory directly rather than calling
+    # ChatwootApp.custom? -- lib/ is only being *added* to the load path here,
+    # so ChatwootApp is not autoloadable yet at this point.
+    if Rails.root.join('custom').exist?
+      config.eager_load_paths << Rails.root.join('custom/lib')
+      config.eager_load_paths << Rails.root.join('custom/listeners')
+      # rubocop:disable Rails/FilePath
+      config.eager_load_paths += Dir["#{Rails.root}/custom/app/**"]
+      # rubocop:enable Rails/FilePath
+      config.paths['app/views'].unshift('custom/app/views')
+
+      custom_initializers = Rails.root.join('custom/config/initializers')
+      Dir[custom_initializers.join('**/*.rb')].each { |f| require f } if custom_initializers.exist?
+    end
+
     # Settings in config/environments/* take precedence over those specified here.
     # Application configuration can go into files in config/initializers
     # -- all .rb files in that directory are automatically loaded after loading
