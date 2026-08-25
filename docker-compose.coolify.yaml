@@ -1,0 +1,162 @@
+# Deployment compose for this fork, consumed by a Coolify "Docker Compose"
+# resource pointed at this repo.
+#
+# Default path: pull the image built by .github/workflows/publish_fork_docker.yml.
+# The Coolify host never compiles anything. To build on the host instead, swap
+# the `image:` lines for the commented `build:` block below -- budget ~6GB RAM
+# and 30-60min for a cold build.
+#
+# Note the lowercase image path: GHCR requires it, and docker/metadata-action
+# lowercases the repository name when pushing.
+
+x-app-image: &app_image ghcr.io/noksoftideas/chatwoot:${IMAGE_TAG:-my-develop}
+
+# Uncomment to build on the Coolify host rather than pulling.
+# x-app-build: &app_build
+#   context: .
+#   dockerfile: docker/Dockerfile
+#   args:
+#     - RAILS_ENV=production
+#     - NODE_OPTIONS=--max-old-space-size=4096
+
+services:
+  rails:
+    image: *app_image
+    # build: *app_build
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+    environment:
+      - SERVICE_FQDN_RAILS_3000
+      - FRONTEND_URL=${SERVICE_FQDN_RAILS_3000}
+      - NODE_ENV=production
+      - RAILS_ENV=production
+      - INSTALLATION_ENV=docker
+      - RAILS_LOG_TO_STDOUT=true
+      - RAILS_MAX_THREADS=${RAILS_MAX_THREADS:-5}
+      - FORCE_SSL=${FORCE_SSL:-false}
+      - ENABLE_ACCOUNT_SIGNUP=${ENABLE_ACCOUNT_SIGNUP:-false}
+      # enterprise/ ships in the repo, so ChatwootApp.enterprise? is true unless
+      # this is set. Irrelevant if the image was built with enterprise stripped.
+      - DISABLE_ENTERPRISE=${DISABLE_ENTERPRISE:-true}
+      # Read by Custom::AgentBuilder. Empty = no restriction.
+      - AGENT_EMAIL_DOMAIN_ALLOWLIST=${AGENT_EMAIL_DOMAIN_ALLOWLIST:-}
+      # Read by Custom::Account. Comma-separated feature flags pinned on
+      # regardless of the stored bitset, e.g. disable_branding.
+      - CUSTOM_FORCED_FEATURES=${CUSTOM_FORCED_FEATURES:-}
+      - SECRET_KEY_BASE=${SERVICE_PASSWORD_64_SECRETKEYBASE}
+      - ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=${SERVICE_PASSWORD_64_ARPRIMARY}
+      - ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=${SERVICE_PASSWORD_64_ARDETERMINISTIC}
+      - ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=${SERVICE_PASSWORD_64_ARSALT}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USERNAME=chatwoot
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DATABASE=chatwoot_production
+      - REDIS_URL=redis://:${SERVICE_PASSWORD_REDIS}@redis:6379
+      - REDIS_PASSWORD=${SERVICE_PASSWORD_REDIS}
+      - ACTIVE_STORAGE_SERVICE=${ACTIVE_STORAGE_SERVICE:-local}
+      - MAILER_SENDER_EMAIL=${MAILER_SENDER_EMAIL:-Chatwoot <no-reply@example.com>}
+      - SMTP_ADDRESS=${SMTP_ADDRESS}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_DOMAIN=${SMTP_DOMAIN}
+      - SMTP_AUTHENTICATION=${SMTP_AUTHENTICATION:-plain}
+      - SMTP_ENABLE_STARTTLS_AUTO=${SMTP_ENABLE_STARTTLS_AUTO:-true}
+      - RAILS_INBOUND_EMAIL_SERVICE=relay
+      - RAILS_INBOUND_EMAIL_PASSWORD=${SERVICE_PASSWORD_INBOUND}
+      - MAILER_INBOUND_EMAIL_DOMAIN=${MAILER_INBOUND_EMAIL_DOMAIN}
+    entrypoint: docker/entrypoints/rails.sh
+    # db:chatwoot_prepare is idempotent: loads schema + seeds on an empty DB,
+    # otherwise runs pending migrations only. Safe on every boot.
+    command:
+      - sh
+      - -c
+      - bundle exec rails db:chatwoot_prepare && bundle exec rails s -p 3000 -b 0.0.0.0
+
+  sidekiq:
+    image: *app_image
+    # build: *app_build
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/app/storage
+    environment:
+      - NODE_ENV=production
+      - RAILS_ENV=production
+      - INSTALLATION_ENV=docker
+      - RAILS_LOG_TO_STDOUT=true
+      - FRONTEND_URL=${SERVICE_FQDN_RAILS_3000}
+      - DISABLE_ENTERPRISE=${DISABLE_ENTERPRISE:-true}
+      - AGENT_EMAIL_DOMAIN_ALLOWLIST=${AGENT_EMAIL_DOMAIN_ALLOWLIST:-}
+      # Read by Custom::Account. Comma-separated feature flags pinned on
+      # regardless of the stored bitset, e.g. disable_branding.
+      - CUSTOM_FORCED_FEATURES=${CUSTOM_FORCED_FEATURES:-}
+      - SECRET_KEY_BASE=${SERVICE_PASSWORD_64_SECRETKEYBASE}
+      - ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=${SERVICE_PASSWORD_64_ARPRIMARY}
+      - ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=${SERVICE_PASSWORD_64_ARDETERMINISTIC}
+      - ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=${SERVICE_PASSWORD_64_ARSALT}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USERNAME=chatwoot
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_DATABASE=chatwoot_production
+      - REDIS_URL=redis://:${SERVICE_PASSWORD_REDIS}@redis:6379
+      - REDIS_PASSWORD=${SERVICE_PASSWORD_REDIS}
+      - ACTIVE_STORAGE_SERVICE=${ACTIVE_STORAGE_SERVICE:-local}
+      - MAILER_SENDER_EMAIL=${MAILER_SENDER_EMAIL:-Chatwoot <no-reply@example.com>}
+      - SMTP_ADDRESS=${SMTP_ADDRESS}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_DOMAIN=${SMTP_DOMAIN}
+      - SMTP_AUTHENTICATION=${SMTP_AUTHENTICATION:-plain}
+      - SMTP_ENABLE_STARTTLS_AUTO=${SMTP_ENABLE_STARTTLS_AUTO:-true}
+      - RAILS_INBOUND_EMAIL_SERVICE=relay
+      - RAILS_INBOUND_EMAIL_PASSWORD=${SERVICE_PASSWORD_INBOUND}
+      - MAILER_INBOUND_EMAIL_DOMAIN=${MAILER_INBOUND_EMAIL_DOMAIN}
+    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=chatwoot_production
+      - POSTGRES_USER=chatwoot
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chatwoot -d chatwoot_production']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: sh -c 'redis-server --requirepass "$$REDIS_PASSWORD"'
+    environment:
+      - REDIS_PASSWORD=${SERVICE_PASSWORD_REDIS}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  storage_data:
+  postgres_data:
+  redis_data:
