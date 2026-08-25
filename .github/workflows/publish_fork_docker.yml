@@ -20,6 +20,9 @@ on:
     paths-ignore:
       - 'docker-compose*.yaml'
       - '**/*.md'
+      # mailtrap-relay runs from a bind mount off the git clone, not from the
+      # image, so editing it does not require a rebuild either.
+      - 'docker/mailtrap-relay/**'
   workflow_dispatch:
 
 env:
