@@ -49,7 +49,14 @@ services:
       - ENABLE_ACCOUNT_SIGNUP=${ENABLE_ACCOUNT_SIGNUP:-false}
       # enterprise/ ships in the repo, so ChatwootApp.enterprise? is true unless
       # this is set. Irrelevant if the image was built with enterprise stripped.
-      - DISABLE_ENTERPRISE=${DISABLE_ENTERPRISE:-true}
+      # Bare passthrough, deliberately. ChatwootApp.enterprise? does
+      # `return if ENV.fetch('DISABLE_ENTERPRISE', false)` -- ENV.fetch yields a
+      # String, and every String is truthy in Ruby, so "false", "0" and even ""
+      # all disable enterprise. The only way to keep it ON is for the variable
+      # to be absent, which an `X=${X:-...}` line can never achieve.
+      # Set DISABLE_ENTERPRISE=true in Coolify for a community build; leave it
+      # unset (the default) to keep enterprise code active.
+      - DISABLE_ENTERPRISE
       # Read by Custom::AgentBuilder. Empty = no restriction.
       - AGENT_EMAIL_DOMAIN_ALLOWLIST=${AGENT_EMAIL_DOMAIN_ALLOWLIST:-}
       # Read by Custom::Account. Comma-separated feature flags pinned on
@@ -109,7 +116,14 @@ services:
       # empty -- mailer links, widget script src and OAuth callbacks all
       # derive from FRONTEND_URL.
       - FRONTEND_URL=${FRONTEND_URL:-${SERVICE_FQDN_RAILS_3000}}
-      - DISABLE_ENTERPRISE=${DISABLE_ENTERPRISE:-true}
+      # Bare passthrough, deliberately. ChatwootApp.enterprise? does
+      # `return if ENV.fetch('DISABLE_ENTERPRISE', false)` -- ENV.fetch yields a
+      # String, and every String is truthy in Ruby, so "false", "0" and even ""
+      # all disable enterprise. The only way to keep it ON is for the variable
+      # to be absent, which an `X=${X:-...}` line can never achieve.
+      # Set DISABLE_ENTERPRISE=true in Coolify for a community build; leave it
+      # unset (the default) to keep enterprise code active.
+      - DISABLE_ENTERPRISE
       - AGENT_EMAIL_DOMAIN_ALLOWLIST=${AGENT_EMAIL_DOMAIN_ALLOWLIST:-}
       # Read by Custom::Account. Comma-separated feature flags pinned on
       # regardless of the stored bitset, e.g. disable_branding.
