@@ -33,7 +33,13 @@ services:
       - storage_data:/app/storage
     environment:
       - SERVICE_FQDN_RAILS_3000
-      - FRONTEND_URL=${SERVICE_FQDN_RAILS_3000}
+      # Coolify only populates SERVICE_FQDN_* reliably for Service resources;
+      # for a Docker Compose application it assigns the domain in the UI and
+      # leaves the magic var blank. Set FRONTEND_URL explicitly there and it
+      # wins; otherwise this falls back to the magic var. Never leave both
+      # empty -- mailer links, widget script src and OAuth callbacks all
+      # derive from FRONTEND_URL.
+      - FRONTEND_URL=${FRONTEND_URL:-${SERVICE_FQDN_RAILS_3000}}
       - NODE_ENV=production
       - RAILS_ENV=production
       - INSTALLATION_ENV=docker
@@ -96,7 +102,13 @@ services:
       - RAILS_ENV=production
       - INSTALLATION_ENV=docker
       - RAILS_LOG_TO_STDOUT=true
-      - FRONTEND_URL=${SERVICE_FQDN_RAILS_3000}
+      # Coolify only populates SERVICE_FQDN_* reliably for Service resources;
+      # for a Docker Compose application it assigns the domain in the UI and
+      # leaves the magic var blank. Set FRONTEND_URL explicitly there and it
+      # wins; otherwise this falls back to the magic var. Never leave both
+      # empty -- mailer links, widget script src and OAuth callbacks all
+      # derive from FRONTEND_URL.
+      - FRONTEND_URL=${FRONTEND_URL:-${SERVICE_FQDN_RAILS_3000}}
       - DISABLE_ENTERPRISE=${DISABLE_ENTERPRISE:-true}
       - AGENT_EMAIL_DOMAIN_ALLOWLIST=${AGENT_EMAIL_DOMAIN_ALLOWLIST:-}
       # Read by Custom::Account. Comma-separated feature flags pinned on
