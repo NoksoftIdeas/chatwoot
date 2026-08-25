@@ -139,6 +139,38 @@ services:
       - MAILER_INBOUND_EMAIL_DOMAIN=${MAILER_INBOUND_EMAIL_DOMAIN}
     command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
 
+  # Bridges Mailtrap Inbound to the ActionMailbox relay ingress. Mailtrap's
+  # webhook is notification-only and it has no IMAP, so neither the relay
+  # ingress nor Chatwoot's IMAP channel can consume it directly.
+  # See docker/mailtrap-relay/README.md.
+  #
+  # Inert unless COMPOSE_PROFILES=mailtrap is set, since it exits on missing
+  # config and would otherwise crashloop on installs not using Mailtrap.
+  mailtrap-relay:
+    profiles: [mailtrap]
+    image: node:22-alpine
+    restart: unless-stopped
+    depends_on:
+      - rails
+    environment:
+      # Coolify assigns this service its own domain; give that to Mailtrap as
+      # the webhook URL. The HMAC check is what authenticates callers.
+      - SERVICE_FQDN_MAILTRAPRELAY_8080
+      - MAILTRAP_SIGNING_SECRET=${MAILTRAP_SIGNING_SECRET}
+      - MAILTRAP_API_TOKEN=${MAILTRAP_API_TOKEN}
+      - MAILTRAP_API_BASE=${MAILTRAP_API_BASE:-https://mailtrap.io}
+      - CHATWOOT_INTERNAL_URL=http://rails:3000
+      - RAILS_INBOUND_EMAIL_PASSWORD=${SERVICE_PASSWORD_INBOUND}
+      - PORT=8080
+    volumes:
+      - ./docker/mailtrap-relay/server.js:/app/server.js:ro
+    command: ['node', '/app/server.js']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
