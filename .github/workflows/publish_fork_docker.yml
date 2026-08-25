@@ -14,6 +14,12 @@ on:
       - my-develop
     tags:
       - fork-v*
+    # The compose file and docs are read by Coolify from the git clone, not
+    # baked into the image, so changing them should not trigger a 40-minute
+    # rebuild that produces an identical image.
+    paths-ignore:
+      - 'docker-compose*.yaml'
+      - '**/*.md'
   workflow_dispatch:
 
 env:
