@@ -12,7 +12,7 @@ class Voice::CallTranscriptionService
   def transcribe
     return unless call.recording.attached?
     return unless Llm::SpeechToTextService.available_for?(call.account)
-    return if Llm::SpeechToTextService.too_large?(recording_blob)
+    return if Llm::SpeechToTextService.too_large?(recording_blob, account: call.account)
 
     transcript = Llm::SpeechToTextService.new(blob: recording_blob, account: call.account).perform
     call.update!(transcript: transcript) if transcript.present?

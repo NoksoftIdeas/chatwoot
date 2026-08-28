@@ -77,7 +77,7 @@ RSpec.describe Messages::AudioTranscriptionService, type: :service do
           content_type: 'audio/mpeg'
         )
         allow(Llm::SpeechToTextService).to receive(:available_for?).and_return(true)
-        allow(attachment.file.blob).to receive(:byte_size).and_return(Llm::SpeechToTextService::BYTE_LIMIT + 1)
+        allow(attachment.file.blob).to receive(:byte_size).and_return(Llm::SpeechToText::OpenAiProvider::BYTE_LIMIT + 1)
       end
 
       it 'returns an error without transcribing' do

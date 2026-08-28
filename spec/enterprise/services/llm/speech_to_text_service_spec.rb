@@ -54,6 +54,51 @@ RSpec.describe Llm::SpeechToTextService, type: :service do
 
       expect(described_class.available_for?(account)).to be(true)
     end
+
+    it 'ignores an exhausted captain balance when the account transcribes on ElevenLabs' do
+      account.enable_features!('captain_integration')
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+      allow(account).to receive(:usage_limits).and_return(captain: { responses: { current_available: 0 } })
+
+      expect(described_class.available_for?(account)).to be(true)
+    end
+
+    it 'still requires the captain feature flag on ElevenLabs' do
+      account.disable_features!('captain_integration')
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+
+      expect(described_class.available_for?(account)).to be(false)
+    end
+
+    it 'still requires the account setting on ElevenLabs' do
+      account.enable_features!('captain_integration')
+      account.update!(audio_transcriptions: false, captain_models: { 'audio_transcription' => 'scribe_v1' })
+
+      expect(described_class.available_for?(account)).to be(false)
+    end
+  end
+
+  describe '.consumes_captain_credits?' do
+    it 'is true on the default OpenAI provider' do
+      expect(described_class.consumes_captain_credits?(account)).to be(true)
+    end
+
+    it 'is false when the account transcribes on ElevenLabs' do
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+
+      expect(described_class.consumes_captain_credits?(account)).to be(false)
+    end
+  end
+
+  describe '.provider_class_for' do
+    it 'maps each registered provider to its adapter' do
+      expect(described_class.provider_class_for('openai')).to eq(Llm::SpeechToText::OpenAiProvider)
+      expect(described_class.provider_class_for('elevenlabs')).to eq(Llm::SpeechToText::ElevenLabsProvider)
+    end
+
+    it 'falls back to OpenAI for an unknown provider' do
+      expect(described_class.provider_class_for('nope')).to eq(Llm::SpeechToText::OpenAiProvider)
+    end
   end
 
   describe '.too_large?' do
@@ -61,10 +106,24 @@ RSpec.describe Llm::SpeechToTextService, type: :service do
       expect(described_class.too_large?(nil)).to be(false)
     end
 
-    it 'is true beyond the byte limit' do
-      allow(attachment.file.blob).to receive(:byte_size).and_return(described_class::BYTE_LIMIT + 1)
+    it 'is true beyond the OpenAI byte limit by default' do
+      allow(attachment.file.blob).to receive(:byte_size).and_return(Llm::SpeechToText::OpenAiProvider::BYTE_LIMIT + 1)
 
-      expect(described_class.too_large?(attachment.file.blob)).to be(true)
+      expect(described_class.too_large?(attachment.file.blob, account: account)).to be(true)
+    end
+
+    it 'allows audio past the OpenAI limit when the account transcribes on ElevenLabs' do
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+      allow(attachment.file.blob).to receive(:byte_size).and_return(Llm::SpeechToText::OpenAiProvider::BYTE_LIMIT + 1)
+
+      expect(described_class.too_large?(attachment.file.blob, account: account)).to be(false)
+    end
+
+    it 'is true beyond the ElevenLabs byte limit' do
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+      allow(attachment.file.blob).to receive(:byte_size).and_return(Llm::SpeechToText::ElevenLabsProvider::BYTE_LIMIT + 1)
+
+      expect(described_class.too_large?(attachment.file.blob, account: account)).to be(true)
     end
   end
 
@@ -79,30 +138,27 @@ RSpec.describe Llm::SpeechToTextService, type: :service do
   end
 
   describe '#perform' do
-    let(:audio_api) { double('audio_api') } # rubocop:disable RSpec/VerifiedDoubles
     let(:audio_file_path) { Rails.root.join('tmp/speech_to_text_service_spec.mp3').to_s }
+    let(:provider) { instance_double(Llm::SpeechToText::OpenAiProvider) }
 
     before do
       File.binwrite(audio_file_path, 'audio')
-      allow(service).to receive(:fetch_audio_file).and_return(audio_file_path)
+      allow(service).to receive_messages(fetch_audio_file: audio_file_path, provider_client: provider)
       allow(account).to receive(:increment_response_usage)
-      allow(service.client).to receive(:audio).and_return(audio_api)
     end
 
     after do
       FileUtils.rm_f(audio_file_path)
     end
 
-    it 'uses the audio transcription feature model' do
-      expect(audio_api).to receive(:transcribe).with(
-        parameters: hash_including(model: 'gpt-4o-mini-transcribe', temperature: 0.0)
-      ).and_return({ 'text' => 'Audio transcript' })
+    it 'delegates the transcription to the provider adapter' do
+      expect(provider).to receive(:transcribe).with(audio_file_path).and_return('Audio transcript')
 
       expect(service.perform).to eq('Audio transcript')
     end
 
     it 'consumes a captain response credit when text comes back' do
-      allow(audio_api).to receive(:transcribe).and_return({ 'text' => 'Audio transcript' })
+      allow(provider).to receive(:transcribe).and_return('Audio transcript')
 
       service.perform
 
@@ -110,11 +166,46 @@ RSpec.describe Llm::SpeechToTextService, type: :service do
     end
 
     it 'does not consume a credit when the transcription is blank' do
-      allow(audio_api).to receive(:transcribe).and_return({ 'text' => '' })
+      allow(provider).to receive(:transcribe).and_return('')
 
       service.perform
 
       expect(account).not_to have_received(:increment_response_usage)
+    end
+
+    it 'removes the temp file even when the provider raises' do
+      allow(provider).to receive(:transcribe).and_raise(Faraday::BadRequestError.new('nope'))
+
+      expect { service.perform }.to raise_error(Faraday::BadRequestError)
+      expect(File.exist?(audio_file_path)).to be(false)
+    end
+
+    context 'when the account transcribes on ElevenLabs' do
+      let(:account) { create(:account, audio_transcriptions: true, captain_models: { 'audio_transcription' => 'scribe_v1' }) }
+      let(:provider) { instance_double(Llm::SpeechToText::ElevenLabsProvider) }
+
+      it 'does not consume a captain response credit' do
+        allow(provider).to receive(:transcribe).and_return('Audio transcript')
+
+        expect(service.perform).to eq('Audio transcript')
+        expect(account).not_to have_received(:increment_response_usage)
+      end
+    end
+  end
+
+  describe 'provider resolution' do
+    it 'defaults to the OpenAI transcription model' do
+      expect(service.provider).to eq('openai')
+      expect(service.transcription_model).to eq('gpt-4o-mini-transcribe')
+      expect(service.send(:provider_client)).to be_a(Llm::SpeechToText::OpenAiProvider)
+    end
+
+    it 'builds the ElevenLabs adapter when the account selects Scribe' do
+      account.update!(captain_models: { 'audio_transcription' => 'scribe_v1' })
+
+      expect(service.provider).to eq('elevenlabs')
+      expect(service.transcription_model).to eq('scribe_v1')
+      expect(service.send(:provider_client)).to be_a(Llm::SpeechToText::ElevenLabsProvider)
     end
   end
 end

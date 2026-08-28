@@ -3,6 +3,18 @@ module Llm::FeatureRouter
 
   CAPTAIN_V2_ASSISTANT_MODEL = 'gpt-5.2'.freeze
 
+  # Features whose model can be pinned instance-wide from Super Admin > App Configs.
+  INSTALLATION_MODEL_CONFIGS = {
+    'conversation_completion' => 'CAPTAIN_OPEN_AI_MODEL',
+    'audio_transcription' => 'CAPTAIN_AUDIO_TRANSCRIPTION_MODEL'
+  }.freeze
+
+  # CAPTAIN_OPEN_AI_MODEL is deliberately unvalidated so self-hosted installs can
+  # point Captain at a custom OpenAI-compatible model behind CAPTAIN_OPEN_AI_ENDPOINT.
+  # Transcription has no such escape hatch and spans providers, so an unrecognised
+  # value there must fall back to the default rather than route to the wrong API.
+  VALIDATED_INSTALLATION_FEATURES = %w[audio_transcription].freeze
+
   class << self
     def resolve(feature:, account: nil)
       feature_key = feature.to_s
@@ -37,10 +49,15 @@ module Llm::FeatureRouter
     end
 
     def installation_model_override(feature_key)
-      return unless feature_key == 'conversation_completion'
+      config_name = INSTALLATION_MODEL_CONFIGS[feature_key]
+      return if config_name.blank?
       return unless ChatwootApp.self_hosted_enterprise?
 
-      InstallationConfig.find_by(name: 'CAPTAIN_OPEN_AI_MODEL')&.value.presence
+      model = InstallationConfig.find_by(name: config_name)&.value.presence
+      return if model.blank?
+      return model unless VALIDATED_INSTALLATION_FEATURES.include?(feature_key)
+
+      model if Llm::Models.valid_model_for?(feature_key, model)
     end
 
     def provider_for(model, source)

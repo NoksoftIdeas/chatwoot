@@ -5,6 +5,8 @@ providers:
     display_name: 'Anthropic'
   gemini:
     display_name: 'Gemini'
+  elevenlabs:
+    display_name: 'ElevenLabs'
 
 models:
   gpt-4.1:
@@ -62,6 +64,10 @@ models:
   gpt-4o-mini-transcribe:
     provider: openai
     display_name: 'GPT-4o Mini Transcribe'
+    credit_multiplier: 1
+  scribe_v1:
+    provider: elevenlabs
+    display_name: 'ElevenLabs Scribe v1'
     credit_multiplier: 1
   text-embedding-3-small:
     provider: openai
@@ -193,7 +199,7 @@ features:
     models: [gpt-4.1-nano, gpt-4.1-mini, gpt-5-mini]
     default: gpt-4.1-nano
   audio_transcription:
-    models: [gpt-4o-mini-transcribe, whisper-1]
+    models: [gpt-4o-mini-transcribe, whisper-1, scribe_v1]
     default: gpt-4o-mini-transcribe
   help_center_search:
     models: [text-embedding-3-small]

@@ -61,6 +61,41 @@ RSpec.describe Llm::FeatureRouter do
       )
     end
 
+    it 'uses the installation model for audio transcription on self-hosted Enterprise' do
+      allow(ChatwootApp).to receive(:self_hosted_enterprise?).and_return(true)
+      InstallationConfig.find_or_initialize_by(name: 'CAPTAIN_AUDIO_TRANSCRIPTION_MODEL').update!(value: 'scribe_v1')
+
+      resolved = described_class.resolve(feature: 'audio_transcription', account: account)
+
+      expect(resolved).to eq(
+        feature: 'audio_transcription',
+        provider: 'elevenlabs',
+        model: 'scribe_v1',
+        source: :installation_override
+      )
+    end
+
+    it 'ignores an unrecognised audio transcription installation model' do
+      allow(ChatwootApp).to receive(:self_hosted_enterprise?).and_return(true)
+      InstallationConfig.find_or_initialize_by(name: 'CAPTAIN_AUDIO_TRANSCRIPTION_MODEL').update!(value: 'not-a-model')
+
+      resolved = described_class.resolve(feature: 'audio_transcription', account: account)
+
+      expect(resolved).to include(
+        provider: 'openai',
+        model: 'gpt-4o-mini-transcribe',
+        source: :default
+      )
+    end
+
+    it 'keeps the audio transcription installation model out of cloud installs' do
+      InstallationConfig.find_or_initialize_by(name: 'CAPTAIN_AUDIO_TRANSCRIPTION_MODEL').update!(value: 'scribe_v1')
+
+      resolved = described_class.resolve(feature: 'audio_transcription', account: account)
+
+      expect(resolved).to include(model: 'gpt-4o-mini-transcribe', source: :default)
+    end
+
     it 'keeps the OpenAI provider for a custom installation model' do
       allow(ChatwootApp).to receive(:self_hosted_enterprise?).and_return(true)
       InstallationConfig.find_or_initialize_by(name: 'CAPTAIN_OPEN_AI_MODEL').update!(value: 'custom-openai-model')

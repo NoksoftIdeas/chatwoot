@@ -1,63 +1,92 @@
 # Blob-in, text-out audio transcription shared by voice-note attachments
 # (Messages::AudioTranscriptionService) and voice-call recordings
 # (Voice::CallTranscriptionService).
-class Llm::SpeechToTextService < Llm::LegacyBaseOpenAiService
+#
+# Fetching the blob, metering and instrumentation live here; the API call itself
+# is delegated to the adapter for whichever provider owns the model resolved for
+# the audio_transcription feature. Callers stay provider-agnostic.
+class Llm::SpeechToTextService
   include Integrations::LlmInstrumentation
 
-  # OpenAI's transcription endpoint hard limit is 25 MB *decimal* (25_000_000), not
-  # binary (25.megabytes = 26_214_400) — using the binary form leaks the 25.0–26.2 MB
-  # range to the API as 413s. Long audio (~70+ min Opus) keeps the source audio but
-  # skips transcription.
-  BYTE_LIMIT = 25_000_000
+  FEATURE = 'audio_transcription'.freeze
 
-  attr_reader :blob, :account, :transcription_model
+  PROVIDERS = {
+    'openai' => 'Llm::SpeechToText::OpenAiProvider',
+    'elevenlabs' => 'Llm::SpeechToText::ElevenLabsProvider'
+  }.freeze
+  DEFAULT_PROVIDER = 'openai'.freeze
 
-  # Transcription runs on Captain's OpenAI credentials and consumes its response credits.
+  attr_reader :blob, :account, :transcription_model, :provider
+
+  # Captain gates the *entitlement* for every provider — the feature flag and the
+  # account setting. It gates the *balance* only when the provider spends
+  # Captain's own credentials: ElevenLabs bills directly against
+  # ELEVENLABS_API_KEY, so an exhausted response quota is no reason to refuse
+  # work Captain is not paying for.
   def self.available_for?(account)
     return false unless account.feature_enabled?('captain_integration')
     return false if account.audio_transcriptions.blank?
+    return true unless consumes_captain_credits?(account)
 
     account.usage_limits[:captain][:responses][:current_available].positive?
   end
 
-  def self.too_large?(blob)
-    blob.present? && blob.byte_size > BYTE_LIMIT
+  def self.consumes_captain_credits?(account)
+    provider_class_for(resolve(account)[:provider]).consumes_captain_credits?
+  end
+
+  # The ceiling is the transcribing provider's, so pass the account whose
+  # configuration will do the work. Without one this answers for the default
+  # provider, which is what a caller with no account context can act on.
+  def self.too_large?(blob, account: nil)
+    return false if blob.blank?
+
+    blob.byte_size > byte_limit_for(account)
+  end
+
+  def self.byte_limit_for(account = nil)
+    provider_class_for(resolve(account)[:provider]).byte_limit
+  end
+
+  def self.resolve(account)
+    Llm::FeatureRouter.resolve(feature: FEATURE, account: account)
+  end
+
+  def self.provider_class_for(provider)
+    PROVIDERS.fetch(provider.to_s, PROVIDERS.fetch(DEFAULT_PROVIDER)).constantize
   end
 
   def initialize(blob:, account:)
-    super()
     @blob = blob
     @account = account
-    @transcription_model = Llm::FeatureRouter.resolve(feature: 'audio_transcription', account: account)[:model]
+
+    route = self.class.resolve(account)
+    @transcription_model = route[:model]
+    @provider = route[:provider].presence || DEFAULT_PROVIDER
   end
 
   def perform
     temp_file_path = fetch_audio_file
-    transcribed_text = nil
 
-    File.open(temp_file_path, 'rb') do |file|
-      transcribed_text = instrument_audio_transcription(instrumentation_params(temp_file_path)) do
-        # temperature: 0.0 minimises hallucinations on silence / near-silent
-        # audio; non-zero values trigger spiraling repeats — well-documented
-        # behaviour across OpenAI transcription models.
-        response = @client.audio.transcribe(
-          parameters: {
-            model: transcription_model,
-            file: file,
-            temperature: 0.0
-          }
-        )
-        response['text']
-      end
+    transcribed_text = instrument_audio_transcription(instrumentation_params(temp_file_path)) do
+      provider_client.transcribe(temp_file_path)
     end
 
-    account.increment_response_usage if transcribed_text.present?
+    account.increment_response_usage if transcribed_text.present? && consumes_captain_credits?
     transcribed_text
   ensure
     FileUtils.rm_f(temp_file_path) if temp_file_path.present?
   end
 
   private
+
+  def provider_client
+    @provider_client ||= self.class.provider_class_for(provider).new(model: transcription_model)
+  end
+
+  def consumes_captain_credits?
+    self.class.provider_class_for(provider).consumes_captain_credits?
+  end
 
   def fetch_audio_file
     temp_dir = Rails.root.join('tmp/uploads/audio-transcriptions')
@@ -96,7 +125,7 @@ class Llm::SpeechToTextService < Llm::LegacyBaseOpenAiService
       span_name: 'llm.messages.audio_transcription',
       model: transcription_model,
       account_id: account&.id,
-      feature_name: 'audio_transcription',
+      feature_name: FEATURE,
       file_path: file_path
     }
   end

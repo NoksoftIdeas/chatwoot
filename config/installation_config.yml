@@ -199,6 +199,10 @@
   display_title: 'Embedding Model (optional)'
   description: 'The embedding model configured for use in Captain AI. Default: text-embedding-3-small'
   locked: false
+- name: CAPTAIN_AUDIO_TRANSCRIPTION_MODEL
+  display_title: 'Audio Transcription Model (optional)'
+  description: 'Model used to transcribe voice notes and call recordings. One of: gpt-4o-mini-transcribe, whisper-1, scribe_v1 (ElevenLabs Scribe, which needs ELEVENLABS_API_KEY). Unrecognised values fall back to the default. Default: gpt-4o-mini-transcribe'
+  locked: false
 - name: CAPTAIN_FIRECRAWL_API_KEY
   display_title: 'FireCrawl API Key (optional)'
   description: 'The FireCrawl API key for the Captain AI service'
@@ -228,6 +232,14 @@
   locked: false
   type: number
 # End of Captain Config
+
+# MARK: ElevenLabs Config
+- name: ELEVENLABS_API_KEY
+  display_title: 'ElevenLabs API Key'
+  description: 'API key for ElevenLabs. Required when CAPTAIN_AUDIO_TRANSCRIPTION_MODEL (or an account model override) selects an ElevenLabs transcription model.'
+  locked: false
+  type: secret
+# End of ElevenLabs Config
 
 # ------- Context.dev Config ------- #
 - name: CONTEXT_DEV_API_KEY
