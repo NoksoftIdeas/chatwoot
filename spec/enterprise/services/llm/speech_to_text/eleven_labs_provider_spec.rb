@@ -28,15 +28,17 @@ RSpec.describe Llm::SpeechToText::ElevenLabsProvider, type: :service do
       expect(request).to have_been_requested
     end
 
-    it 'sends the resolved model id and suppresses audio event tags' do
+    it 'sends the resolved model id in the multipart body' do
       stub_request(:post, described_class::API_URL)
         .to_return(status: 200, headers: { content_type: 'application/json' }, body: { text: 'ok' }.to_json)
 
       provider.transcribe(audio_file_path)
 
-      expect(a_request(:post, described_class::API_URL).with(body: /name="model_id"/)).to have_been_made
-      expect(a_request(:post, described_class::API_URL).with(body: /scribe_v1/)).to have_been_made
-      expect(a_request(:post, described_class::API_URL).with(body: /name="tag_audio_events"/)).to have_been_made
+      # WebMock cannot match a multipart body through `body:`, so match on the
+      # raw request signature instead.
+      expect(
+        a_request(:post, described_class::API_URL).with { |req| req.body.include?('scribe_v1') }
+      ).to have_been_made
     end
 
     it 'raises Faraday::UnauthorizedError on a rejected key so callers can skip transcription' do
@@ -65,6 +67,18 @@ RSpec.describe Llm::SpeechToText::ElevenLabsProvider, type: :service do
 
       expect { provider.transcribe(audio_file_path) }
         .to raise_error(described_class::ConfigurationError, 'ELEVENLABS_API_KEY is not configured')
+    end
+  end
+
+  describe '#payload' do
+    it 'carries the resolved model id and suppresses audio event tags' do
+      File.open(audio_file_path, 'rb') do |file|
+        payload = provider.send(:payload, file, audio_file_path)
+
+        expect(payload[:model_id]).to eq('scribe_v1')
+        expect(payload[:tag_audio_events]).to eq('false')
+        expect(payload[:file]).to be_a(Faraday::Multipart::FilePart)
+      end
     end
   end
 

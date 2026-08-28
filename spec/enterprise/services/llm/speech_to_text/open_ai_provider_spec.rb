@@ -30,7 +30,7 @@ RSpec.describe Llm::SpeechToText::OpenAiProvider, type: :service do
   end
 
   describe '.consumes_captain_credits?' do
-    it 'spends a captain credit because it runs on Captain's OpenAI key' do
+    it 'is true because transcription runs on the Captain OpenAI key' do
       expect(described_class.consumes_captain_credits?).to be(true)
     end
   end
