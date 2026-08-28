@@ -33,7 +33,7 @@ class Call < ApplicationRecord
   TERMINAL_STATUSES = %w[completed no_answer failed rejected].freeze
 
   store_accessor :meta, :conference_sid, :twilio_conference_sid, :recording_sid, :parent_call_sid, :initiated_at, :ended_at,
-                 :accepted_broadcast_at
+                 :accepted_broadcast_at, :answered_by, :voice_agent_conversation_id, :escalation_reason
 
   # Frontend voice bubbles/stores expect inbound/outbound string values
   DISPLAY_DIRECTION = { 'incoming' => 'inbound', 'outgoing' => 'outbound' }.freeze
@@ -88,6 +88,16 @@ class Call < ApplicationRecord
 
   def self.status_from_display(value)
     value.to_s.tr('-', '_')
+  end
+
+  def answered_by_agent?
+    answered_by == 'ai'
+  end
+
+  # The AI took the call and has since handed it to a human, so it must not be
+  # offered back to the agent when Twilio re-requests our TwiML.
+  def escalated_from_agent?
+    answered_by == 'ai_escalated'
   end
 
   def ringing?
@@ -148,7 +158,8 @@ class Call < ApplicationRecord
       from_number: from_number,
       to_number: to_number,
       recording_url: recording_url,
-      transcript: transcript
+      transcript: transcript,
+      answered_by: answered_by
     }
   end
 end

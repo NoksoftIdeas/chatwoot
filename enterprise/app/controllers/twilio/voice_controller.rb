@@ -27,7 +27,9 @@ class Twilio::VoiceController < ApplicationController
     return render xml: reject_twiml if reject_inbound?
 
     call = resolve_call
-    render xml: conference_twiml(call)
+    # The AI agent gets first refusal; conference_twiml is both the default and
+    # the fallback when it declines or fails.
+    render xml: voice_agent_twiml(call) || conference_twiml(call)
   end
 
   def conference_status
@@ -100,6 +102,17 @@ class Twilio::VoiceController < ApplicationController
     Twilio::TwiML::VoiceResponse.new(&:reject).to_s
   end
 
+  # nil means "a human should take this" — which is also what the answer service
+  # returns when ElevenLabs declines or is unreachable.
+  def voice_agent_twiml(call)
+    policy = Voice::Agent::RoutingPolicy.new(inbox: inbox, call: call, direction: twilio_direction, from: twilio_from)
+    return unless policy.agent_answers?
+
+    twiml = Voice::Agent::AnswerService.new(call: call, from: twilio_from, to: twilio_to).perform
+    Rails.logger.info("TWILIO_VOICE_AGENT_ANSWERED account=#{current_account.id} call_sid=#{twilio_call_sid}") if twiml.present?
+    twiml
+  end
+
   def resolve_call
     return find_call_for_agent if agent_leg?(twilio_from)
 
@@ -147,10 +160,10 @@ class Twilio::VoiceController < ApplicationController
           start_conference_on_enter: agent_leg?(twilio_from),
           end_conference_on_exit: false,
           record: 'record-from-start',
-          recording_status_callback: recording_status_callback_url,
+          recording_status_callback: inbox_channel.voice_recording_status_webhook_url,
           recording_status_callback_event: 'completed',
           recording_status_callback_method: 'POST',
-          status_callback: conference_status_callback_url,
+          status_callback: inbox_channel.voice_conference_status_webhook_url,
           status_callback_event: 'start end join leave',
           status_callback_method: 'POST',
           participant_label: participant_label_for(twilio_from)
@@ -170,16 +183,6 @@ class Twilio::VoiceController < ApplicationController
     return from_number.delete_prefix('client:') if from_number.start_with?('client:')
 
     'contact'
-  end
-
-  def conference_status_callback_url
-    phone_digits = inbox_channel.phone_number.delete_prefix('+')
-    Rails.application.routes.url_helpers.twilio_voice_conference_status_url(phone: phone_digits)
-  end
-
-  def recording_status_callback_url
-    phone_digits = inbox_channel.phone_number.delete_prefix('+')
-    Rails.application.routes.url_helpers.twilio_voice_recording_status_url(phone: phone_digits)
   end
 
   def find_call_for_conference!(friendly_name, call_sid)

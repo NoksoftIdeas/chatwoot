@@ -131,6 +131,71 @@ RSpec.describe 'Twilio::VoiceController', type: :request do
     end
   end
 
+  describe 'POST /twilio/voice/call/:phone with an AI voice agent' do
+    let(:call_sid) { 'CA_agent_call_sid_123' }
+    let(:from_number) { '+15550003333' }
+    let(:agent_twiml) { '<Response><Connect><Stream url="wss://elevenlabs"/></Connect></Response>' }
+    let(:call) do
+      conversation = create(:conversation, account: account, inbox: inbox)
+      create(:call, account: account, inbox: inbox, conversation: conversation,
+                    contact: conversation.contact, provider_call_id: call_sid)
+    end
+
+    before do
+      call.update!(conference_sid: call.default_conference_sid)
+      allow(Voice::InboundCallBuilder).to receive(:perform!).and_return(call)
+      channel.update!(provider_config: channel.provider_config.merge(
+        'voice_agent' => { 'provider' => 'elevenlabs', 'agent_id' => 'agent_abc123', 'mode' => 'always' }
+      ))
+    end
+
+    def post_inbound_call
+      post "/twilio/voice/call/#{digits}", params: {
+        'CallSid' => call_sid, 'From' => from_number,
+        'To' => channel.phone_number, 'Direction' => 'inbound'
+      }
+    end
+
+    it 'renders the TwiML the agent hands back instead of a conference' do
+      allow_any_instance_of(Voice::Agent::AnswerService).to receive(:perform).and_return(agent_twiml) # rubocop:disable RSpec/AnyInstance
+
+      post_inbound_call
+
+      expect(response.body).to eq(agent_twiml)
+      expect(response.body).not_to include('Conference')
+    end
+
+    it 'falls back to the human conference when the agent cannot take the call' do
+      allow_any_instance_of(Voice::Agent::AnswerService).to receive(:perform).and_return(nil) # rubocop:disable RSpec/AnyInstance
+
+      post_inbound_call
+
+      expect(response.body).to include('Conference')
+    end
+
+    it 'leaves the conference in place when the mode is off' do
+      channel.update!(provider_config: channel.provider_config.merge(
+        'voice_agent' => { 'agent_id' => 'agent_abc123', 'mode' => 'off' }
+      ))
+      expect(Voice::Agent::AnswerService).not_to receive(:new)
+
+      post_inbound_call
+
+      expect(response.body).to include('Conference')
+    end
+
+    it 'never hands an agent leg to the AI' do
+      expect(Voice::Agent::AnswerService).not_to receive(:new)
+
+      post "/twilio/voice/call/#{digits}", params: {
+        'CallSid' => call_sid, 'From' => 'client:agent-1-account-2',
+        'To' => channel.phone_number, 'Direction' => 'inbound', 'call_sid' => call_sid
+      }
+
+      expect(response.body).to include('Conference')
+    end
+  end
+
   describe 'POST /twilio/voice/status/:phone' do
     let(:call_sid) { 'CA_status_sid_456' }
 

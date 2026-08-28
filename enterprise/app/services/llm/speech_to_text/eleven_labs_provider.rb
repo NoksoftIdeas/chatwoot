@@ -86,9 +86,8 @@ class Llm::SpeechToText::ElevenLabsProvider
   end
 
   def api_key
-    key = InstallationConfig.find_by(name: 'ELEVENLABS_API_KEY')&.value.presence
-    raise ConfigurationError, 'ELEVENLABS_API_KEY is not configured' if key.blank?
-
-    key
+    ElevenLabs::Credentials.api_key!
+  rescue ElevenLabs::Credentials::MissingApiKeyError => e
+    raise ConfigurationError, e.message
   end
 end

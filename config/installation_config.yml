@@ -239,6 +239,11 @@
   description: 'API key for ElevenLabs. Required when CAPTAIN_AUDIO_TRANSCRIPTION_MODEL (or an account model override) selects an ElevenLabs transcription model.'
   locked: false
   type: secret
+- name: ELEVENLABS_WEBHOOK_SECRET
+  display_title: 'ElevenLabs Webhook Secret'
+  description: 'Shared secret the ElevenLabs voice agent sends as the X-Chatwoot-Signature header when calling back to escalate a call to a human. Escalation is refused until this is set.'
+  locked: false
+  type: secret
 # End of ElevenLabs Config
 
 # ------- Context.dev Config ------- #

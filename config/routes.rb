@@ -683,6 +683,13 @@ Rails.application.routes.draw do
     resource :callback, only: [:show]
   end
 
+  if ChatwootApp.enterprise?
+    namespace :eleven_labs do
+      post 'webhooks/escalate', to: 'webhooks#escalate'
+      post 'webhooks/post_call', to: 'webhooks#post_call'
+    end
+  end
+
   namespace :twilio do
     resources :callback, only: [:create]
     resources :delivery_status, only: [:create]

@@ -12,6 +12,38 @@ module Enterprise::Channel::TwilioSms
     end
   end
 
+  # An AI agent answers inbound calls on this inbox when a provider agent is
+  # configured and the mode says so. Stored in provider_config (jsonb, defaults
+  # to {}) alongside inbound_calls_enabled, so no migration is needed:
+  #
+  #   { "voice_agent": { "provider": "elevenlabs", "agent_id": "...", "mode": "fallback" } }
+  #
+  # off      - humans only; the shipped default, so this stays inert until set
+  # always   - the agent answers every inbound call
+  # fallback - the agent answers only when no human is available
+  VOICE_AGENT_MODES = %w[off always fallback].freeze
+
+  def voice_agent_config
+    provider_config['voice_agent'].presence || {}
+  end
+
+  def voice_agent_id
+    voice_agent_config['agent_id'].presence
+  end
+
+  def voice_agent_provider
+    voice_agent_config['provider'].presence || 'elevenlabs'
+  end
+
+  def voice_agent_mode
+    mode = voice_agent_config['mode'].to_s
+    VOICE_AGENT_MODES.include?(mode) ? mode : 'off'
+  end
+
+  def voice_agent_enabled?
+    voice_enabled? && inbound_calls_enabled? && voice_agent_id.present? && voice_agent_mode != 'off'
+  end
+
   def initiate_call(to:, conference_sid: nil, agent_id: nil)
     Voice::Provider::Twilio::Adapter.new(self).initiate_call(
       to: to,
@@ -28,6 +60,16 @@ module Enterprise::Channel::TwilioSms
   def voice_status_webhook_url
     digits = phone_number.delete_prefix('+')
     Rails.application.routes.url_helpers.twilio_voice_status_url(phone: digits)
+  end
+
+  def voice_conference_status_webhook_url
+    digits = phone_number.delete_prefix('+')
+    Rails.application.routes.url_helpers.twilio_voice_conference_status_url(phone: digits)
+  end
+
+  def voice_recording_status_webhook_url
+    digits = phone_number.delete_prefix('+')
+    Rails.application.routes.url_helpers.twilio_voice_recording_status_url(phone: digits)
   end
 
   # Voice channels store the secret in api_key_secret; SMS channels keep using auth_token via super.
