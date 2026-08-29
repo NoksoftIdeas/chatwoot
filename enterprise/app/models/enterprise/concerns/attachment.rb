@@ -14,6 +14,9 @@ module Enterprise::Concerns::Attachment
 
   def enqueue_audio_transcription
     return unless file_type.to_sym == :audio
+    # Synthesised speech already has its text on the message that carries it.
+    # Transcribing it would burn a Captain credit to recover what we just said.
+    return if meta&.dig('source') == 'tts'
 
     # No file.attached? guard: the social-media ingest path saves the
     # Attachment before attaching the blob. AudioTranscriptionJob retries

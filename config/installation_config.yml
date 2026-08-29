@@ -239,6 +239,14 @@
   description: 'API key for ElevenLabs. Required when CAPTAIN_AUDIO_TRANSCRIPTION_MODEL (or an account model override) selects an ElevenLabs transcription model.'
   locked: false
   type: secret
+- name: ELEVENLABS_TTS_VOICE_ID
+  display_title: 'ElevenLabs Voice ID (optional)'
+  description: 'Default voice used for spoken replies. Accounts can override it in their own settings. Defaults to ElevenLabs'' stock voice 21m00Tcm4TlvDq8ikWAM.'
+  locked: false
+- name: ELEVENLABS_TTS_MODEL
+  display_title: 'ElevenLabs Voice Model (optional)'
+  description: 'Model used to synthesise spoken replies. Default: eleven_flash_v2_5'
+  locked: false
 - name: ELEVENLABS_WEBHOOK_SECRET
   display_title: 'ElevenLabs Webhook Secret'
   description: 'Shared secret the ElevenLabs voice agent sends as the X-Chatwoot-Signature header when calling back to escalate a call to a human. Escalation is refused until this is set.'
