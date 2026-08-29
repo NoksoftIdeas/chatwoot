@@ -4,6 +4,7 @@ import { mapGetters } from 'vuex';
 
 import ChatAttachmentButton from 'widget/components/ChatAttachment.vue';
 import ChatSendButton from 'widget/components/ChatSendButton.vue';
+import VoiceCallButton from 'widget/components/VoiceCallButton.vue';
 import { useAttachments } from '../composables/useAttachments';
 import FluentIcon from 'shared/components/FluentIcon/Index.vue';
 import ResizableTextArea from 'shared/components/ResizableTextArea.vue';
@@ -18,6 +19,7 @@ export default {
     ChatAttachmentButton,
     ChatSendButton,
     EmojiPicker,
+    VoiceCallButton,
     FluentIcon,
     ResizableTextArea,
   },
@@ -57,6 +59,9 @@ export default {
       isWidgetOpen: 'appConfig/getIsWidgetOpen',
       shouldShowEmojiPicker: 'appConfig/getShouldShowEmojiPicker',
     }),
+    showVoiceCall() {
+      return !!window.chatwootWebChannel?.voiceAgentEnabled;
+    },
     showAttachment() {
       return this.canHandleAttachments && this.userInput.length === 0;
     },
@@ -155,6 +160,7 @@ export default {
       @blur="onBlur"
     />
     <div class="relative flex items-center ltr:pl-2 rtl:pr-2">
+      <VoiceCallButton v-if="showVoiceCall" />
       <ChatAttachmentButton
         v-if="showAttachment"
         class="text-n-slate-12"

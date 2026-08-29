@@ -12,16 +12,17 @@ class Voice::Agent::PostCallIngestionService
   # "user"; in Chatwoot the caller is the contact.
   ROLE_LABELS = { 'user' => 'Caller', 'agent' => 'Agent' }.freeze
 
+  # Namespaces the external id we stamp on transcribed widget turns.
+  SOURCE_ID_PREFIX = 'elevenlabs'.freeze
+
   pattr_initialize [:payload!]
 
   def perform
     return :ignored unless supported_type?
-    return :call_not_found if call.blank?
+    return ingest_for_call! if call.present?
+    return ingest_for_widget_conversation! if widget_conversation.present?
 
-    case payload['type']
-    when TRANSCRIPT_TYPE then ingest_transcript!
-    when AUDIO_TYPE then ingest_audio!
-    end
+    :target_not_found
   end
 
   private
@@ -43,7 +44,85 @@ class Voice::Agent::PostCallIngestionService
   end
 
   def chatwoot_call_id
-    data.dig('conversation_initiation_client_data', 'dynamic_variables', 'chatwoot_call_id')
+    dynamic_variables['chatwoot_call_id']
+  end
+
+  def dynamic_variables
+    data.dig('conversation_initiation_client_data', 'dynamic_variables').presence || {}
+  end
+
+  # Widget sessions have no Call row. They are identified by a signed reference
+  # the browser was handed at session start, so a forged conversation id cannot
+  # inject a transcript into someone else's thread.
+  def widget_conversation
+    return @widget_conversation if defined?(@widget_conversation)
+
+    reference = Voice::Agent::WidgetSessionService.resolve_reference(dynamic_variables['chatwoot_voice_reference'])
+    @widget_conversation = reference && Conversation.find_by(id: reference[:conversation_id], account_id: reference[:account_id])
+  end
+
+  def ingest_for_call!
+    case payload['type']
+    when TRANSCRIPT_TYPE then ingest_transcript!
+    when AUDIO_TYPE then ingest_audio!
+    end
+  end
+
+  # A widget transcript becomes ordinary conversation messages, so the visitor's
+  # spoken words and the agent's replies read like any other chat.
+  def ingest_for_widget_conversation!
+    return :ignored unless payload['type'] == TRANSCRIPT_TYPE
+    return :already_ingested if already_ingested?
+
+    turns = transcript_turns
+    return :empty if turns.blank?
+
+    turns.each_with_index { |turn, index| create_widget_message!(turn, index) }
+    :transcript_stored
+  end
+
+  # Dedup rides on source_id rather than content_attributes: that column is
+  # `json` and Rails stores it double-encoded, so `->> 'key'` reads NULL and
+  # every redelivery would look new. source_id is a plain indexed text column
+  # and is what external message ids are for.
+  def already_ingested?
+    return false if voice_session_id.blank?
+
+    widget_conversation.messages.exists?(['source_id LIKE ?', "#{sanitized_source_prefix}%"])
+  end
+
+  def voice_session_id
+    data['conversation_id'].presence
+  end
+
+  def source_prefix
+    "#{SOURCE_ID_PREFIX}:#{voice_session_id}:"
+  end
+
+  def sanitized_source_prefix
+    ActiveRecord::Base.sanitize_sql_like(source_prefix)
+  end
+
+  def create_widget_message!(turn, index)
+    widget_conversation.messages.create!(
+      account_id: widget_conversation.account_id,
+      inbox_id: widget_conversation.inbox_id,
+      message_type: turn[:role] == 'user' ? :incoming : :outgoing,
+      content: turn[:message],
+      source_id: voice_session_id.present? ? "#{source_prefix}#{index}" : nil,
+      content_attributes: { 'voice_session_id' => voice_session_id }
+    )
+  end
+
+  def transcript_turns
+    Array(data['transcript']).filter_map do |turn|
+      next unless turn.is_a?(Hash)
+
+      message = (turn['message'].presence || turn['text']).to_s.strip
+      next if message.blank?
+
+      { role: turn['role'].to_s, message: message }
+    end
   end
 
   def ingest_transcript!
@@ -55,17 +134,11 @@ class Voice::Agent::PostCallIngestionService
     :transcript_stored
   end
 
-  # Turns are [{ role: 'user'|'agent', message: '...' }, ...]. Rendered as
-  # labelled lines because Call#transcript is a plain text column — the same
-  # shape Llm::SpeechToTextService produces for human calls.
+  # Rendered as labelled lines because Call#transcript is a plain text column ---
+  # the same shape Llm::SpeechToTextService produces for human calls.
   def rendered_transcript
-    Array(data['transcript']).filter_map do |turn|
-      next unless turn.is_a?(Hash)
-
-      message = (turn['message'].presence || turn['text']).to_s.strip
-      next if message.blank?
-
-      "#{ROLE_LABELS.fetch(turn['role'].to_s, turn['role'].to_s.titleize)}: #{message}"
+    transcript_turns.map do |turn|
+      "#{ROLE_LABELS.fetch(turn[:role], turn[:role].titleize)}: #{turn[:message]}"
     end.join("\n").presence
   end
 

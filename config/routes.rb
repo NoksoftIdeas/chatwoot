@@ -490,6 +490,7 @@ Rails.application.routes.draw do
         resources :campaigns, only: [:index]
         resources :events, only: [:create]
         resources :messages, only: [:index, :create, :update]
+        resource :voice_session, only: [:create], controller: 'voice_sessions' if ChatwootApp.enterprise?
         resources :conversations, only: [:index, :create] do
           collection do
             post :destroy_custom_attributes

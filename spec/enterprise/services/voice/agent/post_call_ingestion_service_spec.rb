@@ -78,6 +78,63 @@ RSpec.describe Voice::Agent::PostCallIngestionService, type: :service do
       expect(call.reload.recording).to be_attached
     end
 
+    context 'when the transcript belongs to a widget voice session' do
+      let(:widget_account) { create(:account, voice_widget_agent_id: 'agent_widget_1') }
+      let(:widget_inbox) { create(:inbox, account: widget_account) }
+      let(:widget_conversation) { create(:conversation, account: widget_account, inbox: widget_inbox) }
+      let(:reference) do
+        Voice::Agent::WidgetSessionService.new(conversation: widget_conversation).send(:signed_reference)
+      end
+
+      def widget_payload(turns, ref: reference, session_id: 'conv_widget_1')
+        {
+          'type' => 'post_call_transcription',
+          'data' => {
+            'conversation_id' => session_id,
+            'transcript' => turns,
+            'conversation_initiation_client_data' => { 'dynamic_variables' => { 'chatwoot_voice_reference' => ref } }
+          }
+        }
+      end
+
+      it 'writes each turn into the conversation with the right direction' do
+        payload = widget_payload([
+                                   { 'role' => 'user', 'message' => 'Where is my order?' },
+                                   { 'role' => 'agent', 'message' => 'Let me check.' }
+                                 ])
+
+        expect(described_class.new(payload: payload).perform).to eq(:transcript_stored)
+
+        messages = widget_conversation.messages.order(:id)
+        expect(messages.map(&:content)).to eq(['Where is my order?', 'Let me check.'])
+        expect(messages.map(&:message_type)).to eq(%w[incoming outgoing])
+      end
+
+      it 'never speaks a transcribed turn back through TTS' do
+        widget_account.update!(voice_replies: true)
+        payload = widget_payload([{ 'role' => 'agent', 'message' => 'Let me check.' }])
+
+        described_class.new(payload: payload).perform
+
+        expect(Messages::VoiceReplyJob).not_to have_been_enqueued
+      end
+
+      it 'is idempotent when ElevenLabs redelivers the webhook' do
+        payload = widget_payload([{ 'role' => 'user', 'message' => 'Hello' }])
+
+        described_class.new(payload: payload).perform
+        expect(described_class.new(payload: payload).perform).to eq(:already_ingested)
+        expect(widget_conversation.messages.count).to eq(1)
+      end
+
+      it 'refuses a forged reference' do
+        payload = widget_payload([{ 'role' => 'user', 'message' => 'Hello' }], ref: 'forged')
+
+        expect(described_class.new(payload: payload).perform).to eq(:target_not_found)
+        expect(widget_conversation.messages.count).to eq(0)
+      end
+    end
+
     it 'ignores an unknown webhook type' do
       expect(described_class.new(payload: { 'type' => 'something_else' }).perform).to eq(:ignored)
     end
@@ -85,13 +142,13 @@ RSpec.describe Voice::Agent::PostCallIngestionService, type: :service do
     it 'reports a call it cannot find rather than raising' do
       payload = transcript_payload([{ 'role' => 'agent', 'message' => 'Hi' }], call_id: '999999')
 
-      expect(described_class.new(payload: payload).perform).to eq(:call_not_found)
+      expect(described_class.new(payload: payload).perform).to eq(:target_not_found)
     end
 
     it 'reports a missing call id rather than raising' do
       payload = { 'type' => 'post_call_transcription', 'data' => {} }
 
-      expect(described_class.new(payload: payload).perform).to eq(:call_not_found)
+      expect(described_class.new(payload: payload).perform).to eq(:target_not_found)
     end
 
     it 'rebroadcasts the message so open dashboards pick up the transcript' do

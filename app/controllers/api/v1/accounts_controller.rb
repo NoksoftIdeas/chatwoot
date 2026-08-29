@@ -121,7 +121,7 @@ class Api::V1::AccountsController < Api::BaseController
 
   def permitted_settings_attributes
     [:auto_resolve_after, :auto_resolve_message, :auto_resolve_ignore_waiting, :audio_transcriptions, :auto_resolve_label,
-     :voice_replies, :voice_reply_voice_id]
+     :voice_replies, :voice_reply_voice_id, :voice_widget_agent_id]
   end
 
   def check_signup_enabled

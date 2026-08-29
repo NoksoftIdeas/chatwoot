@@ -10,6 +10,13 @@ class Messages::VoiceReplyService
   # tell which reply it belongs to.
   VOICE_REPLY_ATTRIBUTE = 'voice_reply_for'.freeze
 
+  # Set by Voice::Agent::PostCallIngestionService on messages transcribed from a
+  # live voice session. The visitor already heard those words spoken; running
+  # them back through TTS would bill for audio nobody needs.
+  VOICE_SESSION_ATTRIBUTE = 'voice_session_id'.freeze
+
+  SKIP_ATTRIBUTES = [VOICE_REPLY_ATTRIBUTE, VOICE_SESSION_ATTRIBUTE].freeze
+
   pattr_initialize [:message!]
 
   # Cheap pre-check, so the common case never enqueues a job.
@@ -27,7 +34,10 @@ class Messages::VoiceReplyService
   end
 
   def self.already_a_voice_reply?(message)
-    message.content_attributes&.key?(VOICE_REPLY_ATTRIBUTE)
+    attributes = message.content_attributes
+    return false if attributes.blank?
+
+    SKIP_ATTRIBUTES.any? { |key| attributes.key?(key) }
   end
 
   def perform

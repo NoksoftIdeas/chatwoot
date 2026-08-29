@@ -35,6 +35,7 @@
     "@breezystack/lamejs": "^1.2.7",
     "@chatwoot/ninja-keys": "1.2.3",
     "@chatwoot/prosemirror-schema": "1.4.1",
+    "@elevenlabs/client": "^1.23.0",
     "@chatwoot/utils": "^0.0.57",
     "@chatwoot/viz": "^0.1.5",
     "@formkit/core": "^1.7.2",

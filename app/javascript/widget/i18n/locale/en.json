@@ -154,5 +154,16 @@
   },
   "FOOTER_REPLY_TO": {
     "REPLY_TO": "Replying to:"
+  },
+  "VOICE_CALL": {
+    "START": "Talk to us",
+    "CONNECTING": "Connecting…",
+    "LISTENING": "Listening — tap to end",
+    "SPEAKING": "Speaking — tap to end",
+    "ERRORS": {
+      "MICROPHONE_DENIED": "Microphone access is needed to talk",
+      "UNAVAILABLE": "Voice is unavailable right now",
+      "CONNECTION_LOST": "The voice connection was lost"
+    }
   }
 }

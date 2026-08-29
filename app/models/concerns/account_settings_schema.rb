@@ -14,6 +14,7 @@ module AccountSettingsSchema
         'audio_transcriptions': { 'type': %w[boolean null] },
         'voice_replies': { 'type': %w[boolean null] },
         'voice_reply_voice_id': { 'type': %w[string null] },
+        'voice_widget_agent_id': { 'type': %w[string null] },
         'auto_resolve_label': { 'type': %w[string null] },
         'keep_pending_on_bot_failure': { 'type': %w[boolean null] },
         'captain_auto_resolve_mode': { 'type': %w[string null], 'enum': ['evaluated', 'legacy', 'disabled', nil] },
