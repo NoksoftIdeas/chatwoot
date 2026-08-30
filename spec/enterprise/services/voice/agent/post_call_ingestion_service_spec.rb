@@ -135,6 +135,31 @@ RSpec.describe Voice::Agent::PostCallIngestionService, type: :service do
       end
     end
 
+    context 'when matching the call to the webhook' do
+      it 'prefers the conversation id recorded at registration' do
+        call.update!(voice_agent_conversation_id: 'conv_live')
+        payload = {
+          'type' => 'post_call_transcription',
+          'data' => {
+            'conversation_id' => 'conv_live',
+            'transcript' => [{ 'role' => 'agent', 'message' => 'Hello' }],
+            # Deliberately wrong: the authoritative id must win over it.
+            'conversation_initiation_client_data' => { 'dynamic_variables' => { 'chatwoot_call_id' => '999999' } }
+          }
+        }
+
+        expect(described_class.new(payload: payload).perform).to eq(:transcript_stored)
+        expect(call.reload.transcript).to eq('Agent: Hello')
+      end
+
+      it 'falls back to the dynamic variable for calls answered before ids were recorded' do
+        payload = transcript_payload([{ 'role' => 'agent', 'message' => 'Hello' }])
+
+        expect(described_class.new(payload: payload).perform).to eq(:transcript_stored)
+        expect(call.reload.transcript).to eq('Agent: Hello')
+      end
+    end
+
     it 'ignores an unknown webhook type' do
       expect(described_class.new(payload: { 'type' => 'something_else' }).perform).to eq(:ignored)
     end

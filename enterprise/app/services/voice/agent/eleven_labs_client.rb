@@ -15,6 +15,20 @@ class Voice::Agent::ElevenLabsClient
 
   API_URL = 'https://api.elevenlabs.io/v1/convai/twilio/register-call'.freeze
 
+  # Registering allocates the ElevenLabs conversation up front and names it in
+  # the TwiML, so we learn its id before the caller is even connected:
+  #
+  #   <Response><Connect><Stream url="wss://api.elevenlabs.io/v1/convai/conversation">
+  #     <Parameter name="conversation_id" value="conv_..."/>
+  #   </Stream></Connect></Response>
+  #
+  # Worth keeping: it is ElevenLabs' own identifier for the conversation, so
+  # matching the post-call webhook on it is more reliable than trusting a
+  # dynamic variable to survive the round trip.
+  Registration = Struct.new(:twiml, :conversation_id, keyword_init: true)
+
+  CONVERSATION_ID_PARAMETER = 'conversation_id'.freeze
+
   # This runs inside Twilio's inbound webhook, which Twilio abandons after 15s.
   # Stay well inside that so a slow ElevenLabs still leaves us time to fall back
   # to the human conference rather than dropping the caller.
@@ -23,10 +37,13 @@ class Voice::Agent::ElevenLabsClient
 
   pattr_initialize [:agent_id!]
 
-  # Returns TwiML (String) for Twilio to render.
+  # Returns a Registration: the TwiML for Twilio to render, and the ElevenLabs
+  # conversation id embedded in it (nil if they ever stop including it).
   def register_call(from:, to:, direction: 'inbound', dynamic_variables: {})
     response = connection.post(API_URL, payload(from, to, direction, dynamic_variables).to_json)
-    extract_twiml(response)
+    twiml = extract_twiml(response)
+
+    Registration.new(twiml: twiml, conversation_id: extract_conversation_id(twiml))
   end
 
   private
@@ -59,6 +76,15 @@ class Voice::Agent::ElevenLabsClient
     twiml
   rescue JSON::ParserError
     raise RegistrationError, "Unparseable ElevenLabs response: #{body.truncate(200)}"
+  end
+
+  # Never raises: a missing id costs us the stronger webhook match, not the call.
+  def extract_conversation_id(twiml)
+    parameter = Nokogiri::XML(twiml).at_xpath("//Parameter[@name='#{CONVERSATION_ID_PARAMETER}']")
+    parameter && parameter['value'].presence
+  rescue StandardError => e
+    Rails.logger.warn("VOICE_AGENT_CONVERSATION_ID_UNPARSED #{e.class}: #{e.message}")
+    nil
   end
 
   def connection

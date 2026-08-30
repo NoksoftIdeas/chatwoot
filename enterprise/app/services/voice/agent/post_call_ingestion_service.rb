@@ -35,12 +35,28 @@ class Voice::Agent::PostCallIngestionService
     @data ||= payload['data'].presence || {}
   end
 
+  # Prefer ElevenLabs' own conversation id, which Voice::Agent::AnswerService
+  # recorded at registration: it is authoritative and cannot be lost or altered
+  # in the round trip. The dynamic variable stays as a fallback for calls
+  # answered before that was captured.
   def call
     return @call if defined?(@call)
 
-    @call = chatwoot_call_id.present? ? Call.find_by(id: chatwoot_call_id) : nil
-    Rails.logger.warn("VOICE_AGENT_POST_CALL_UNKNOWN_CALL id=#{chatwoot_call_id.inspect}") if @call.blank?
+    @call = call_by_agent_conversation || call_by_dynamic_variable
+    Rails.logger.warn("VOICE_AGENT_POST_CALL_UNKNOWN_CALL conversation=#{voice_session_id.inspect}") if @call.blank?
     @call
+  end
+
+  def call_by_agent_conversation
+    return if voice_session_id.blank?
+
+    Call.by_voice_agent_conversation_id(voice_session_id).first
+  end
+
+  def call_by_dynamic_variable
+    return if chatwoot_call_id.blank?
+
+    Call.find_by(id: chatwoot_call_id)
   end
 
   def chatwoot_call_id

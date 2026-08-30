@@ -8,14 +8,14 @@ class Voice::Agent::AnswerService
   pattr_initialize [:call!, :from!, :to!]
 
   def perform
-    twiml = client.register_call(
+    registration = client.register_call(
       from: from,
       to: to,
       direction: 'inbound',
       dynamic_variables: dynamic_variables
     )
-    mark_answered_by_agent!
-    twiml
+    mark_answered_by_agent!(registration.conversation_id)
+    registration.twiml
   rescue StandardError => e
     Rails.logger.error("VOICE_AGENT_ANSWER_FAILED call=#{call.id} inbox=#{call.inbox_id} #{e.class}: #{e.message}")
     ChatwootExceptionTracker.new(e, account: call.account).capture_exception
@@ -45,7 +45,10 @@ class Voice::Agent::AnswerService
     }
   end
 
-  def mark_answered_by_agent!
-    call.update!(answered_by: 'ai')
+  # Recorded before a word is spoken, so the post-call webhook can match on
+  # ElevenLabs' own conversation id rather than on a dynamic variable we asked
+  # them to echo back.
+  def mark_answered_by_agent!(conversation_id)
+    call.update!(answered_by: 'ai', voice_agent_conversation_id: conversation_id)
   end
 end

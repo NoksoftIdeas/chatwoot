@@ -3,7 +3,15 @@ require 'rails_helper'
 RSpec.describe Voice::Agent::ElevenLabsClient, type: :service do
   subject(:client) { described_class.new(agent_id: 'agent_abc123') }
 
-  let(:twiml) { '<Response><Connect><Stream url="wss://api.elevenlabs.io/v1/convai/stream"/></Connect></Response>' }
+  # The shape ElevenLabs actually returns, confirmed against the live API.
+  let(:twiml) do
+    <<~TWIML.strip
+      <?xml version="1.0" encoding="UTF-8"?><Response><Connect>
+      <Stream url="wss://api.elevenlabs.io/v1/convai/conversation">
+      <Parameter name="conversation_id" value="conv_abc123" />
+      </Stream></Connect></Response>
+    TWIML
+  end
 
   before do
     InstallationConfig.find_or_create_by!(name: 'ELEVENLABS_API_KEY') { |config| config.value = 'test-eleven-key' }
@@ -15,7 +23,7 @@ RSpec.describe Voice::Agent::ElevenLabsClient, type: :service do
                 .with(headers: { 'xi-api-key' => 'test-eleven-key' })
                 .to_return(status: 200, headers: { content_type: 'application/xml' }, body: twiml)
 
-      expect(client.register_call(from: '+15551110000', to: '+15552220000')).to eq(twiml)
+      expect(client.register_call(from: '+15551110000', to: '+15552220000').twiml).to eq(twiml)
       expect(request).to have_been_requested
     end
 
@@ -61,17 +69,41 @@ RSpec.describe Voice::Agent::ElevenLabsClient, type: :service do
       expect(matcher).to have_been_made
     end
 
+    describe 'the conversation id ElevenLabs allocates at registration' do
+      it 'is pulled off the Stream parameter' do
+        stub_request(:post, described_class::API_URL).to_return(status: 200, body: twiml)
+
+        expect(client.register_call(from: '+1555', to: '+1666').conversation_id).to eq('conv_abc123')
+      end
+
+      it 'is nil when the TwiML carries no such parameter' do
+        bare = '<Response><Connect><Stream url="wss://x"/></Connect></Response>'
+        stub_request(:post, described_class::API_URL).to_return(status: 200, body: bare)
+
+        expect(client.register_call(from: '+1555', to: '+1666').conversation_id).to be_nil
+      end
+
+      it 'does not fail the call when the TwiML will not parse' do
+        stub_request(:post, described_class::API_URL).to_return(status: 200, body: '<Response><broken')
+
+        registration = client.register_call(from: '+1555', to: '+1666')
+
+        expect(registration.twiml).to eq('<Response><broken')
+        expect(registration.conversation_id).to be_nil
+      end
+    end
+
     context 'when the response is not raw TwiML' do
       it 'accepts a bare JSON string' do
         stub_request(:post, described_class::API_URL).to_return(status: 200, body: twiml.to_json)
 
-        expect(client.register_call(from: '+1555', to: '+1666')).to eq(twiml)
+        expect(client.register_call(from: '+1555', to: '+1666').twiml).to eq(twiml)
       end
 
       it 'accepts a wrapper object' do
         stub_request(:post, described_class::API_URL).to_return(status: 200, body: { twiml: twiml }.to_json)
 
-        expect(client.register_call(from: '+1555', to: '+1666')).to eq(twiml)
+        expect(client.register_call(from: '+1555', to: '+1666').twiml).to eq(twiml)
       end
 
       it 'raises when no TwiML can be found' do

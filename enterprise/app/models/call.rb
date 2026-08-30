@@ -59,6 +59,7 @@ class Call < ApplicationRecord
 
   scope :active, -> { where.not(status: TERMINAL_STATUSES) }
   scope :by_conference_sid, ->(sid) { where("meta->>'conference_sid' = ?", sid) }
+  scope :by_voice_agent_conversation_id, ->(id) { where("meta->>'voice_agent_conversation_id' = ?", id) }
   scope :by_twilio_conference_sid, ->(sid) { where("meta->>'twilio_conference_sid' = ?", sid) }
 
   def self.find_by_provider_call_id(provider, sid)

@@ -7,9 +7,12 @@ class ElevenLabs::TextToSpeechClient
 
   API_ROOT = 'https://api.elevenlabs.io/v1/text-to-speech'.freeze
 
-  # ElevenLabs' own default voice. Overridable per installation and per account
-  # so this is a starting point rather than a decision baked into the code.
-  DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'.freeze
+  # Sarah, from ElevenLabs' `premade` set. Deliberately not one of the "library"
+  # voices (Rachel and friends): the API rejects those for accounts without a
+  # paid plan with 402 paid_plan_required, so a library default would make the
+  # feature look broken on exactly the accounts most likely to be trialling it.
+  # Overridable per installation and per account.
+  DEFAULT_VOICE_ID = 'EXAVITQu4vr4xnSDxMaL'.freeze
   DEFAULT_MODEL = 'eleven_flash_v2_5'.freeze
 
   # ElevenLabs returns mp3/pcm/ulaw; there is no opus output. That matters
